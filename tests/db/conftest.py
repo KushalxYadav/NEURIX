@@ -48,6 +48,10 @@ def _as_postgres(command: list[str]) -> list[str]:
     return command
 
 
+# macOS: the postmaster aborts ("became multithreaded during startup") without a valid LC_ALL.
+PG_ENV = {**os.environ, "LC_ALL": os.environ.get("LC_ALL") or "C"}
+
+
 def apply_sql(url: str, path: Path) -> None:
     with psycopg.connect(url, autocommit=True) as conn:
         conn.execute(path.read_text())
@@ -67,11 +71,12 @@ def database_url() -> Iterator[str]:
     if os.geteuid() == 0:
         shutil.chown(workdir, "postgres", "postgres")
     port = _free_port()
-    subprocess.run(_as_postgres([initdb, "-D", str(data), "-U", "postgres", "--auth=trust", "-E", "UTF8"]), check=True, capture_output=True)
+    subprocess.run(_as_postgres([initdb, "-D", str(data), "-U", "postgres", "--auth=trust", "-E", "UTF8"]), check=True, capture_output=True, env=PG_ENV)
     subprocess.run(
         _as_postgres([pg_ctl, "-D", str(data), "-l", str(workdir / "log"), "-w", "-o", f"-p {port} -k {workdir} -c listen_addresses=127.0.0.1", "start"]),
         check=True,
         capture_output=True,
+        env=PG_ENV,
     )
     admin = f"postgresql://postgres@127.0.0.1:{port}/postgres"
     for _ in range(50):
@@ -88,7 +93,7 @@ def database_url() -> Iterator[str]:
             apply_sql(url, migration)
         yield url
     finally:
-        subprocess.run(_as_postgres([pg_ctl, "-D", str(data), "-m", "immediate", "stop"]), capture_output=True)
+        subprocess.run(_as_postgres([pg_ctl, "-D", str(data), "-m", "immediate", "stop"]), capture_output=True, env=PG_ENV)
         shutil.rmtree(workdir, ignore_errors=True)
 
 

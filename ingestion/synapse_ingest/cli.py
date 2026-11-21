@@ -67,6 +67,7 @@ def parse_overview_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--html", help="parse a standalone HTML file and print a summary (debugging)")
 
     def main(args: argparse.Namespace, paths: Paths) -> int:
+        from .lms_export import run_lms_export_stage
         from .overview import parse_overview_file, run_overview_stage
 
         if args.html:
@@ -81,6 +82,7 @@ def parse_overview_main(argv: list[str] | None = None) -> int:
             }
             print(json.dumps(summary, indent=2, ensure_ascii=False))
             return 0
+        run_lms_export_stage(paths)
         run_overview_stage(paths)
         return 0
 
@@ -177,6 +179,10 @@ def run_pipeline_main(argv: list[str] | None = None) -> int:
         inventory = inspect_archive(
             archive, paths, overview_override=args.overview, textbook_override=args.textbook
         ).inventory
+        from .lms_export import run_lms_export_stage
+
+        LOG.info("== Stage A2: LMS export (course-data.js), if present")
+        run_lms_export_stage(paths)
         LOG.info("== Stage B: weekly overview")
         if inventory["weekly_overview"]["selected"]:
             run_overview_stage(paths)
@@ -199,11 +205,16 @@ def run_pipeline_main(argv: list[str] | None = None) -> int:
         run_documents_stage(paths, force=args.force, retries=args.retries, ocr=args.ocr, only=only)
         LOG.info("== Stage E: source index")
         index = build_source_index(paths, subject_name=args.subject_name, subject_slug=args.subject_slug)
+        from .questions import run_questions_stage
+
+        LOG.info("== Stage G: practice questions and key terms")
+        questions = run_questions_stage(paths)
         stats = index["stats"]
         print(
             f"\nSYNAPSE ingestion complete: {stats['documents']} documents, {stats['content_units']} units, "
             f"{stats['chunks']} chunks. Status: {stats['by_status']}\n"
-            f"Reports: {paths.reports}/processing_report.md, inventory_report.md, weekly_overview_report.md"
+            f"Practice: {questions['stats']}\n"
+            f"Reports: {paths.reports}/processing_report.md, inventory_report.md, weekly_overview_report.md, curriculum_report.md"
         )
         return 0
 

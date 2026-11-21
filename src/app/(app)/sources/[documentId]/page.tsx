@@ -17,12 +17,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getSubjectContext } from "@/lib/server/context";
 import { attempt } from "@/lib/server/load";
 import { formatBytes, formatNumber, formatTimestamp } from "@/lib/utils/format";
+import { SOURCE_VIEWER_PAGE_SIZE } from "@/modules/curriculum/schedule";
 import { DOCUMENT_TYPE_LABEL } from "@/modules/sources/timeline";
 import type { DocumentUnit } from "@/modules/sources/types";
 
 export const metadata: Metadata = { title: "Document" };
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = SOURCE_VIEWER_PAGE_SIZE;
 const FLAG_LABELS: Record<string, string> = {
   has_table: "Table",
   has_chart: "Chart",
@@ -194,7 +195,7 @@ async function DocumentDetail({ params, searchParams }: { params: Params; search
         ) : (
           <ol className="flex flex-col gap-3">
             {units.items.map((unit) => (
-              <li key={unit.id} className="glass rounded-2xl p-4">
+              <li key={unit.id} id={`unit-${unit.unitNumber}`} className="glass scroll-mt-24 rounded-2xl p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-[13px] font-semibold text-foreground">
                     {unitHeading(unit)}

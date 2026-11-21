@@ -16,6 +16,7 @@ import { getSubjectContext } from "@/lib/server/context";
 import { attempt } from "@/lib/server/load";
 import { formatDateRange } from "@/lib/utils/format";
 import { DOCUMENT_TYPE_LABEL, weekDisplayName } from "@/modules/sources/timeline";
+import { getCurriculum } from "@/modules/curriculum";
 import type { DocumentSummary, Week } from "@/modules/sources/types";
 
 export const metadata: Metadata = { title: "Week" };
@@ -50,19 +51,22 @@ async function WeekDetail({ params }: { params: Promise<{ weekId: string }> }) {
   const { weekId } = await params;
   const loaded = await attempt(async () => {
     const context = await getSubjectContext();
-    if (!context.subject) return { ...context, week: null, documents: [] as DocumentSummary[] };
-    const [week, documents] = await Promise.all([
+    if (!context.subject) return { ...context, week: null, documents: [] as DocumentSummary[], curriculum: null };
+    const [week, documents, availability] = await Promise.all([
       context.repo.getWeek(context.subject.id, weekId),
       context.repo.listDocuments(context.subject.id),
+      getCurriculum(context.subject.id),
     ]);
-    return { ...context, week, documents };
+    return { ...context, week, documents, curriculum: availability.curriculum };
   });
   if (!loaded.ok) return <DataErrorPanel error={loaded.error} />;
-  const { subject, repo, week, documents } = loaded.value;
+  const { subject, repo, week, documents, curriculum } = loaded.value;
   if (!subject) return <NoSourcesState mode={repo.mode} />;
   if (!week) notFound();
 
   const linked = documents.filter((d) => week.documentIds.includes(d.id));
+  const taught = curriculum?.sessions.filter((s) => s.planWeek?.weekId === week.id) ?? [];
+  const plannedHere = curriculum?.sessions.filter((s) => s.plannedTopicMatch?.weekId === week.id && s.planWeek?.weekId !== week.id) ?? [];
   const textbook = documents.find((d) => d.documentType === "textbook");
   const chapterMatches = matchTextbookChapters(week, textbook);
   const unresolved = week.resources.filter((r) => r.kind === "unresolved");
@@ -88,6 +92,43 @@ async function WeekDetail({ params }: { params: Promise<{ weekId: string }> }) {
 
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="flex flex-col gap-4 lg:col-span-3">
+          {curriculum && (
+            <Card>
+              <CardHeader>
+                <div>
+                  <CardTitle>Taught this week</CardTitle>
+                  <CardDescription>Sessions whose printed date falls in this week.</CardDescription>
+                </div>
+                <EvidenceBadge evidence="source_confirmed" />
+              </CardHeader>
+              <CardContent className="flex flex-col gap-2">
+                {taught.length === 0 && <p className="text-[13px] text-muted">No dated session falls in this week.</p>}
+                {taught.map((s) => (
+                  <Link key={s.key} href={`/learning/${s.key}`} className="rounded-xl border border-border bg-surface p-3 hover:border-border-strong">
+                    <div className="text-[12px] text-subtle">
+                      {s.label} · {s.date}
+                    </div>
+                    <div className="text-[13.5px] font-medium text-foreground">{s.title}</div>
+                  </Link>
+                ))}
+                {plannedHere.length > 0 && (
+                  <p className="mt-1 text-[12.5px] text-muted">
+                    <Sparkles aria-hidden className="mr-1 inline size-3.5 text-warning" />
+                    Topics planned here but taught in another week (keyword match):{" "}
+                    {plannedHere.map((s, i) => (
+                      <span key={s.key}>
+                        {i > 0 && ", "}
+                        <Link href={`/learning/${s.key}`} className="text-primary hover:underline">
+                          {s.label} {s.title}
+                        </Link>
+                        {s.planWeek ? ` (${s.planWeek.label.split(" (")[0]})` : " (undated)"}
+                      </span>
+                    ))}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader>
               <div>

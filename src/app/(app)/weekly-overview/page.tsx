@@ -1,6 +1,8 @@
 import { CalendarX2, ChevronRight, Info } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+
+import { getCurriculum, type Session } from "@/modules/curriculum";
 import { Suspense } from "react";
 
 import { DataErrorPanel } from "@/components/common/data-error";
@@ -38,10 +40,16 @@ async function Timeline() {
   const loaded = await attempt(async () => {
     const context = await getSubjectContext();
     const weeks = context.subject ? await context.repo.listWeeks(context.subject.id) : [];
-    return { ...context, weeks };
+    const curriculum = context.subject ? (await getCurriculum(context.subject.id)).curriculum : null;
+    return { ...context, weeks, curriculum };
   });
   if (!loaded.ok) return <DataErrorPanel error={loaded.error} />;
-  const { subject, repo, weeks } = loaded.value;
+  const { subject, repo, weeks, curriculum } = loaded.value;
+  const delivered = new Map<string, Session[]>();
+  for (const session of curriculum?.sessions ?? []) {
+    if (session.planWeek) delivered.set(session.planWeek.weekId, [...(delivered.get(session.planWeek.weekId) ?? []), session]);
+  }
+  const shifted = curriculum?.discrepancies.filter((d) => d.kind === "plan_vs_delivery").length ?? 0;
   if (!subject) return <NoSourcesState mode={repo.mode} />;
   if (weeks.length === 0) {
     return (
@@ -69,6 +77,15 @@ async function Timeline() {
           {subject.overview.parserStrategy && <> ({subject.overview.parserStrategy.detail})</>}
         </span>
       </div>
+      {shifted > 0 && (
+        <div className="mb-5 flex gap-2 rounded-xl border border-warning/25 bg-warning-soft px-3 py-2 text-[13px] text-warning">
+          <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <span>
+            This is the course plan. The dated slides, readings and Module 2 schedule show {shifted} sessions taught in a different week than planned. Each week below lists what was
+            actually taught in it (placed by date only); sessions without a printed date are not placed.
+          </span>
+        </div>
+      )}
       {subject.overview.warnings.length > 0 && (
         <div className="mb-5 flex gap-2 rounded-xl border border-warning/25 bg-warning-soft px-3 py-2 text-[13px] text-warning">
           <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
@@ -116,6 +133,16 @@ async function Timeline() {
                   </ul>
                 )}
                 {week.topics.length > 6 && <div className="mt-1 text-[12.5px] text-subtle">+{week.topics.length - 6} more</div>}
+                {(delivered.get(week.id)?.length ?? 0) > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[12px] text-subtle">Taught (by date):</span>
+                    {delivered.get(week.id)!.map((s) => (
+                      <Badge key={s.key} tone="success">
+                        {s.label} · {s.title}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-4">
                   <WeekCoverageChips row={coverage.get(week.id)} />
                 </div>

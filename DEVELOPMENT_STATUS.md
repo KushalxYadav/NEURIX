@@ -1,144 +1,62 @@
 # DEVELOPMENT_STATUS.md
 
-Last updated: 2026-11-20 · Branch: `claude/brave-euler-8e6szp`
+Last updated: 2026-11-21 · Branch: `claude/brave-euler-8e6szp` · Environment: local Mac (local mode)
 
-| Phase | Scope | Status |
+| Milestone | Scope | Status |
 |---|---|---|
-| 0 | Repository & source audit | ✅ Done — archive **not available** in the build environment (`SOURCE_AUDIT.md`) |
-| 1 | Web foundation, design system, auth, multi-subject schema | ✅ Done (Supabase-mode flows untested against a live project) |
-| 2 | Local source ingestion (Stages A–E) | ✅ Done — verified on a synthetic archive; **awaits the real archive** |
-| 3 | Curriculum intelligence | ⏳ Next — needs the real archive's output |
-| 4 | AI teaching system (provider ✅, retrieval SQL ✅, agents/UI ⏳) | Foundations in place |
-| 5–7 | Practice & revision, exam preparation, quality & deployment | Not started (schema ready) |
+| 1 | Repository audit | ✅ Done |
+| 2 | Archive discovery and ingestion | ✅ Done — real archive processed (46 documents, 3,267 chunks); Petzold OCR'd |
+| 3 | Curriculum mapping | ✅ Done — 20 sessions, dates, overview weeks, 37 resolved book citations, 23 recorded discrepancies (`SOURCE_AUDIT.md`) |
+| 4 | App foundation: dashboard, timeline, Learning Room | ✅ Done (local mode) |
+| 5 | AI Tutor: grounded retrieval with citations | ✅ Retrieval done and tested · ⚠ Claude answers implemented and unit-tested with a fake client, **not yet run against the live API (no key)** |
+| 6 | Practice, flashcards, notes | ✅ Done (local mode) |
+| 7 | Planner and analytics | ✅ Done (local mode) |
+| 8 | Testing and deployment readiness | ◐ Full test suite run locally; deployment needs Supabase-mode learning state (below) |
 
-## Phase 0 — Repository and source audit
+## What works today (local mode, no credentials)
 
-- **Implemented:** full search for the archive (repo, remote branches, whole
-  container, upload mounts, Remote Control); `SOURCE_AUDIT.md`; `.gitignore`
-  and `.vercelignore` rules that keep archives and extracted material out of
-  Git and deployments.
-- **Finding:** the repository contained only `README.md`; the ZIP was not
-  present anywhere reachable. No content was invented.
-- **Required from you:** run the pipeline locally on the archive (command in
-  `SOURCE_AUDIT.md §7`).
+- **Ingestion** (`npm run ingest`, ~10 s cached): Stage A archive safety + inventory → **A2 LMS export** (`viewer/course-data.js`, parsed as JSON, never executed) → B Weekly Overview (the LMS front page) → C/D extraction (PDF slides cited by slide number, OCR via OCRmyPDF when asked) → E index + chunks → **F curriculum** (sessions, dates, weeks by date only, further-reading → page ranges, assessments, discrepancies) → **G questions** (72 course questions, 67 with official answers, 12 review questions, 55 key terms).
+- **Dashboard**: next class from the dated schedule, last class taught, upcoming assessments (conflicting sources flagged), today's generated tasks, learning evidence and weak topics.
+- **Weekly Overview**: the 16-week plan plus, per week, the sessions actually taught in it (placed by printed dates); plan-vs-delivery banner; week pages list taught sessions and topics planned there but taught elsewhere.
+- **Learning Room**: every session with its driving question (from slide 1), learning objectives (from the reading), schedule summary, slide-by-slide/page-by-page material with citations, key terms, course checkpoint questions with the official answers, cited further reading linked to the exact book pages, clearly-labelled heuristic textbook suggestions, session tutor, personal notes, mapping evidence.
+- **AI Tutor**: BM25 retrieval over all course chunks (course material ranked above books, focused-session boost, per-document diversity); without a key it shows the passages with citations; with a key Claude answers **only** from the retrieved passages, sections are labelled "From your course" / "AI supplementary", and any citation not retrieved is dropped.
+- **Practice Arena**: smart set (unanswered/missed first), per module, per session, practice sets & Quiz 1; answer → reveal official answer → self-grade.
+- **Flashcards**: course key terms + short answered questions, SM-2-style scheduling.
+- **Notes**: per-session or general; create/edit/delete.
+- **Study Planner**: 7-day plan from dated classes ("read before class"), recent classes not consolidated, weak sessions, assessment prep, undated catch-up, due flashcards — each task says why.
+- **Progress**: mastery per session (latest attempt per question; reading never counts), accuracy, streak, weak topics, performance by question source.
+- **Learning state** is stored in `data/learning/state.json` (git-ignored, never deployed), written atomically through an in-process lock.
 
-## Phase 1 — Web foundation
+## Tests (run 2026-11-21)
 
-**Implemented**
-- Next.js 16 App Router + TypeScript, Cache Components with partial
-  prerendering (static shell, streamed data), `proxy.ts` session gate.
-- Design system: dark-first tokens, glass surfaces, a reserved colour language
-  for evidence levels (source confirmed / AI supplementary / unverified) and
-  processing states; Geist typography; Motion for the active-nav indicator;
-  reduced-motion support; skip link; labelled mobile drawer (Radix Dialog).
-- Navigation for all 12 sections, responsive from phone to desktop.
-- Data layer: one domain model, two repositories — **local** (validated
-  `data/processed/` files, hot-reloads after re-ingestion) and **Supabase**
-  (RLS-scoped queries). Zod validation at every boundary.
-- Auth: Supabase email/password sign-up/sign-in/sign-out, email-confirmation
-  callback, open-redirect-safe `next` parameter, per-request `getClaims()`
-  verification in a Data Access Layer.
-- Pages with real data: **Dashboard** (subject overview, exam countdown,
-  current week from overview dates, source coverage, learning evidence, today's
-  tasks, weak topics, recent activity), **Weekly Overview** + week detail,
-  **Subject Curriculum** (sequence, textbook chapters, coverage report),
-  **Source Library** + slide/page viewer with citations and per-document
-  reprocess commands, **Settings** (exam & study preferences saved via server
-  action; configuration status without secrets).
-- Learning Room, AI Tutor, Notes, Practice, Flashcards, Planner and Progress
-  show what each module will do and a **live readiness check** — no mock data.
-- AI foundation: server-only Claude provider (`src/lib/ai`) with configurable
-  model/effort, Zod-validated structured outputs (validated twice), server-side
-  refusal fallback, typed retryable errors, content-free usage logging; shared
-  source-grounding prompt; provider-independent embeddings interface (Voyage).
-- Database (`supabase/migrations`): all 20 requested tables plus
-  `source_files`, `document_units`, `week_documents`, `topic_prerequisites`,
-  `flashcard_reviews`, `ingestion_jobs`, `ai_usage_events`; UUIDs, timestamps,
-  constraints, indexes, composite same-subject foreign keys, RLS on every
-  table, profile trigger, full-text search function, optional pgvector hybrid
-  search (RRF).
+- `pytest tests/ingestion` — 53 passed, 1 skipped (LibreOffice not installed), incl. 18 new tests for the LMS reader, date fixes, curriculum mapping and question extraction (synthetic data only).
+- `vitest` — 39 passed, incl. 12 new: curriculum contract, schedule, assessments/conflicts, mastery, flashcard scheduling, streak, planner, BM25, tutor citation filtering (fake AI client).
+- `pytest tests/db` — 10 passed, 1 skipped (pgvector not installed) on a throwaway PostgreSQL 17 cluster: migrations, RLS, full-text search, loader.
+- Playwright — 14 passed (7 flows × desktop + Pixel 7), incl. a new test that learning pages refuse to invent sessions when the material has none.
+- ESLint and `tsc` clean (ESLint now ignores `data/`, `source-material/` and fixtures — it was linting the archive's bundled JS).
+- Manual browser checks on the real archive: dashboard, timeline, Learning Room index + session, checkpoint attempt persisted, tutor search, planner, flashcards, mobile width (no horizontal scroll).
 
-**Tested**
-- `npm run build` (all 23 routes), ESLint, `tsc` clean.
-- Vitest (27): formatting, timeline/current-week, coverage, local repository
-  (mapping, reload, invalid data), **Python↔TypeScript contract** on real
-  pipeline output, Claude provider with a fake SDK client, error mapping,
-  embeddings client, prompt rendering, data-mode resolution, auth gate.
-- Playwright (12 = 6 flows × desktop + Pixel 7): every nav section, timeline →
-  week → slides with citations, failure reporting, textbook paging with page
-  labels, local-mode auth notice, health endpoint, not-found state; zero console errors.
-- pytest `tests/db` (11) on a real PostgreSQL 16 + pgvector cluster: migrations
-  apply, profile trigger, owner-only access, anonymous lockout, read-only
-  source tables, curriculum corrections only in own subject, cross-subject FK
-  rejection, per-user learning state, reprocess-request rules, full-text
-  ranking + RLS, hybrid vector search, idempotent loader.
+## Not done / known limitations
 
-**Not yet verified (needs credentials)**
-- Sign-up/sign-in, the Supabase repository's PostgREST queries and the
-  Settings server action against a live Supabase project.
-- Real Claude calls (no API key in this environment; provider tested with a
-  fake client).
-
-## Phase 2 — Local source ingestion
-
-**Implemented** (`ingestion/synapse_ingest`, `scripts/*.py`)
-- A: archive discovery (extension-less ZIPs), inventory with SHA-256,
-  categories, signatures, duplicates; rejection of traversal, absolute paths,
-  symlinks, encrypted entries, zip bombs; streamed extraction with byte limits;
-  CRC-verified reuse; overview and textbook selection with recorded reasons.
-- B: structure-agnostic Weekly Overview parser (tables, containers, headings,
-  labels), verbatim topics, objectives, chapter/page references, resolved
-  links, date ranges with year provenance and rollover, explicit vs inferred
-  week numbers, warnings instead of invention.
-- C: slide-aware PPTX extraction (titles, bullet levels, tables, groups,
-  SmartArt, charts, OMML equations, notes, hidden slides, image metadata with
-  decorative-logo detection, formula detection); legacy conversion via
-  LibreOffice or an explicit failure with instructions.
-- D: PDF (physical page + printed label + detected printed page, outline
-  chapters and heading paths, header/footer removal, OCR detection, optional
-  OCRmyPDF), DOCX, EPUB (page-break markers), HTML and text.
-- E: unified index; content units and chunks carrying ID, subject, document,
-  filename, type, week association with evidence, chapter, slide/page,
-  content hash, extraction status and timestamp; source-aware chunking;
-  coverage report; every archive file listed with a status and reason.
-- Status tracking (pending → processing → completed / partially processed /
-  failed / skipped), resumable runs, retries, `--only` per-document
-  reprocessing; Markdown reports; idempotent Postgres loader.
-
-**Tested** — pytest `tests/ingestion` (34) on a generated synthetic archive
-plus malicious archives: safety containment, inventory, duplicates, all
-overview layouts, date parsing, PPTX details, real `.ppt` → `.pptx`
-conversion, broken legacy file reported as failed, PDF page labels/chapters/
-OCR flags, DOCX/EPUB locations, chunk traceability, evidence levels,
-deterministic IDs, caching and `--only`.
-
-**Remaining** — run on the real archive and adjust to anything its structure
-reveals (the overview parser reports which strategy matched and why).
-
-## Next milestone (Phase 3) — what it needs
-
-1. The pipeline output from the real archive (reports in `data/reports/`).
-2. `ANTHROPIC_API_KEY` for the Curriculum Agent.
-3. Decision: Supabase project for persistence (recommended before Phase 4,
-   which stores lessons, chat history and progress).
-
-## Credentials and decisions needed from you
-
-| Item | Needed for |
+| Item | Why / what is needed |
 |---|---|
-| Run `scripts/run_pipeline.py` on the archive locally | Every content feature |
-| Supabase project URL + publishable key; DB URL for the loader | Accounts, saved progress, Phases 4–6 |
-| `ANTHROPIC_API_KEY` | Curriculum Agent, Learning Room, Tutor, Notes, Practice |
-| Optional: Voyage AI key | Hybrid (semantic) retrieval; full-text works without it |
-| Optional: LibreOffice / OCRmyPDF on the ingestion machine | Legacy `.ppt` and scanned pages |
-| Deployment target (Vercel + Supabase as planned) | Phase 7 |
+| Live Claude answers | No `ANTHROPIC_API_KEY` on this machine. Set it in `.env.local` (server only). The provider, prompts and citation filtering are tested with a fake client only. |
+| Generated lessons ("beginner / detailed / exam" write-ups per topic) | Need the API key; today the tutor offers these as one-click prompts grounded in the session. No AI text is pre-generated or stored. |
+| Supabase mode for curriculum + learning state | `curriculum.json`/`questions.json` are not loaded into Postgres yet, and the learning store is local-only. In Supabase mode the learning pages say so instead of pretending. Next: extend `db_loader.py` (sessions → `topics`, questions → `questions`), implement a Supabase `LearningStore` over `attempts`, `notes`, `flashcard_reviews`, `topic_mastery`. |
+| Module 1 session dates S3–S10 | Not printed in the material → not placed in weeks (shown as "undated"). |
+| Class 8 reading (DOCX) answer key | Its answers are in a layout the extractor does not parse; questions show "no published answer". |
+| Diagrams / images | Image-only slides are flagged; no image descriptions are generated (would need a vision model). |
+| `Thinking Log 2/3` | Deliberately not OCR'd or indexed (likely other students' work). |
+| "Today" | Server date in UTC (IST users see the date change at 05:30). |
+| Tutor rate limiting | None (single local user). Add per-user limits before any public deployment with an API key. |
+| DB tests on macOS | Homebrew PostgreSQL needs `LC_ALL`; the test harness now sets it. The pgvector test is skipped unless pgvector is installed. |
 
-## Known limitations
+## Credentials needed later
 
-- Topics on the timeline are verbatim overview lines; structured topics,
-  prerequisites and lesson links arrive with the Curriculum Agent (Phase 3).
-- Matches between overview "Chapter N" references and textbook chapters are
-  numeric and shown as *unverified*.
-- "Today" uses the server's UTC date; per-user timezones come with the planner.
-- Cloud ingestion (Storage upload → worker) is designed (`ingestion_jobs`,
-  `documents.storage_path`) but not built; ingestion is local in v1.
+| Variable | Enables |
+|---|---|
+| `ANTHROPIC_API_KEY` (+ optional `ANTHROPIC_MODEL`, default `claude-opus-5-5`) | Written tutor answers and lesson explanations |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_DB_URL` | Accounts, cloud persistence, deployment (after the Supabase learning store above) |
+| `VOYAGE_API_KEY` (optional) | Hybrid semantic retrieval in Supabase mode |
+
+Note: a Claude Code subscription does not include Anthropic API usage; the API key is billed separately.

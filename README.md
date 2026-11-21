@@ -5,10 +5,13 @@ slides, textbook) into a private learning environment: a week-by-week
 timeline, traceable source material, and — in later phases — AI teaching,
 tutoring, practice, revision and exam planning grounded in that material.
 
-> **Status:** Phases 0–2 are implemented and tested (source audit, web
-> foundation, local ingestion pipeline, database). The real subject archive
-> was not available in the build environment — see [`SOURCE_AUDIT.md`](SOURCE_AUDIT.md).
-> Progress and next steps: [`DEVELOPMENT_STATUS.md`](DEVELOPMENT_STATUS.md).
+> **Status:** Milestones 1–7 work end to end in **local mode** on the real
+> CSD-104 archive: ingestion (incl. the LMS offline-viewer format and OCR),
+> curriculum mapping with evidence, dashboard, weekly timeline, Learning Room,
+> grounded AI Tutor (search-only until an API key is set), practice, flashcards,
+> notes, planner and progress. See [`DEVELOPMENT_STATUS.md`](DEVELOPMENT_STATUS.md)
+> for what is not done yet and [`SOURCE_AUDIT.md`](SOURCE_AUDIT.md) for the
+> source audit and every recorded discrepancy.
 
 ## Principles
 
@@ -90,7 +93,7 @@ See [`ingestion/README.md`](ingestion/README.md). Each stage can run on its own:
 | `scripts/extract_presentations.py` | C — slides, notes, tables, SmartArt | `data/processed/presentations/*.json` |
 | `scripts/extract_book.py` | D — textbook and documents with page labels | `data/processed/documents/*.json` |
 | `scripts/build_source_index.py` | E — units, chunks, coverage | `source_index.json`, `content_units.jsonl`, `chunks.jsonl` |
-| `scripts/run_pipeline.py` | A–E, resumable; `--only <path>` reprocesses one file | all of the above |
+| `scripts/run_pipeline.py` | A–G, resumable; `--only <path>` reprocesses one file | all of the above + `lms_export.json`, `curriculum.json`, `questions.json`, `reports/curriculum_report.md` |
 | `scripts/load_to_database.py` | load into Postgres (idempotent) | Supabase tables |
 
 ## Tests
@@ -112,7 +115,8 @@ course content. Individual suites: `npm run test`, `npm run test:python`,
 src/app/            routes: (app) shell pages, (auth) sign-in, api/, auth/callback, setup
 src/components/     ui/ primitives, shell/ navigation, common/, curriculum/, sources/
 src/lib/            config (env), supabase clients, auth (session/DAL), ai (provider, prompts), utils
-src/modules/        sources (repositories, timeline/coverage logic), learning (activity)
+src/modules/        sources (repositories, timeline/coverage), curriculum (sessions, schedule),
+                    learning (state, local store, actions, planner), tutor (BM25 retrieval, grounded answers)
 src/proxy.ts        session refresh + sign-in gate (Next 16 replacement for middleware)
 ingestion/          Python package synapse_ingest + requirements
 scripts/            pipeline entry points

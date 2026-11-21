@@ -74,6 +74,10 @@ RANGE_DM_DM = re.compile(rf"{DM}{_SEP}{DM}", re.I)
 RANGE_MD_MD = re.compile(rf"{MD}{_SEP}{MD}", re.I)
 RANGE_D_D_M = re.compile(rf"(\d{{1,2}}){_ORD}{_SEP}(\d{{1,2}}){_ORD}\s+{_MONTH}(?:,?\s+(\d{{4}}))?", re.I)
 RANGE_M_D_D = re.compile(rf"{_MONTH}\s+(\d{{1,2}}){_ORD}{_SEP}(\d{{1,2}}){_ORD}(?:,?\s+(\d{{4}}))?", re.I)
+# "19, 21 Oct" / "19 & 21 Oct": a list of class days in one month
+LIST_D_M = re.compile(rf"\b(\d{{1,2}}){_ORD}((?:\s*(?:,|&|and)\s*\d{{1,2}}{_ORD})+)\s+{_MONTH}(?:,?\s+(\d{{4}}))?", re.I)
+# a single day, only accepted inside a short label such as "Week 14 (30 Nov)"
+SINGLE_DM = re.compile(rf"\b{DM}", re.I)
 RANGE_ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})" + _SEP + r"(\d{4})-(\d{2})-(\d{2})")
 RANGE_NUMERIC = re.compile(r"(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})" + _SEP + r"(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})")
 ARCHIVE_DATE_RE = re.compile(r"(\d{4})-([A-Za-z]{3})-(\d{1,2})_")
@@ -244,6 +248,18 @@ def parse_date_range(text: str) -> dict[str, Any] | None:
             "end": _part(d2, int(m2), year(y2)),
             "numeric_order": order,
         }
+    if match := LIST_D_M.search(text):
+        first, rest, month, year = match.groups()
+        days = [int(first)] + [int(d) for d in re.findall(r"\d{1,2}", rest)]
+        return {
+            "raw": match.group(0),
+            "start": _part(str(min(days)), _month(month), year),
+            "end": _part(str(max(days)), _month(month), year),
+            "days": sorted(days),
+        }
+    if len(text) <= 60 and len(SINGLE_DM.findall(text)) == 1 and (match := SINGLE_DM.search(text)):
+        day, month, year = match.groups()
+        return {"raw": match.group(0), "start": _part(day, _month(month), year), "end": _part(day, _month(month), year)}
     return None
 
 
@@ -584,6 +600,10 @@ def complete_years(weeks: list[dict[str, Any]], document_text: str, anchor: date
         base_year, source = explicit_years[0], "explicit_in_overview"
     else:
         years = re.findall(r"\b(20\d{2})\b", document_text)
+        if anchor:
+            # Citations ("Petzold (2000)") must not set the schedule year: only
+            # years within a year of the archive's download date are credible.
+            years = [y for y in years if abs(int(y) - anchor.year) <= 1]
         if years:
             base_year = int(max(set(years), key=years.count))
             source = "overview_text"
@@ -749,6 +769,15 @@ def parse_overview(
     }
 
 
+def is_viewer_shell(html: bytes | str) -> bool:
+    """True for an index.html that only loads scripts (an LMS offline viewer)."""
+    soup = BeautifulSoup(html, "lxml")
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    text = normalize_whitespace(soup.get_text(" "))
+    return len(text) < 40 and "course-data" in (html.decode("utf-8", "replace") if isinstance(html, bytes) else html)
+
+
 def run_overview_stage(paths: Paths) -> dict[str, Any]:
     inventory = read_json(paths.inventory)
     selected = inventory["weekly_overview"]["selected"]
@@ -760,9 +789,20 @@ def run_overview_stage(paths: Paths) -> dict[str, Any]:
     sha = entry["sha256"]
     tracker.register(sha, source_paths=[selected], sha256=sha, category="weekly_overview")
     tracker.start(sha, "overview", sha)
+    html: bytes | str = html_path.read_bytes()
+    lms_source: dict[str, Any] | None = None
+    lms_path = paths.processed / "lms_export.json"
+    if lms_path.exists() and is_viewer_shell(html):
+        # An LMS offline viewer: index.html is an empty shell and the course
+        # plan lives on the export's front page (see lms_export.py).
+        export = read_json(lms_path)
+        front = next((pg for pg in export.get("pages", []) if pg.get("front_page")), None)
+        if front and front.get("html"):
+            html = front["html"]
+            lms_source = {"export_file": export["source_file"], "page_title": front.get("title")}
     try:
         result = parse_overview(
-            html_path.read_bytes(),
+            html,
             overview_path=selected,
             inventory_entries=inventory["entries"],
             archive_filename=inventory["archive"]["filename"],
@@ -771,6 +811,14 @@ def run_overview_stage(paths: Paths) -> dict[str, Any]:
         tracker.finish(sha, "overview", Status.FAILED, error=f"{type(exc).__name__}: {exc}")
         raise
     result["source_sha256"] = sha256_file(html_path)
+    if lms_source:
+        export = read_json(lms_path)
+        result["title"] = result.get("title") or export.get("title")
+        result["source_file"] = lms_source["export_file"]
+        result["source_detail"] = (
+            f"front page '{lms_source['page_title']}' of the LMS export loaded by {selected}"
+        )
+        result["shell_file"] = selected
     write_json_atomic(paths.weekly_overview, result)
     status = Status.COMPLETED if result["weeks"] and result["parser_strategy"]["score"] >= 2 else Status.PARTIAL
     tracker.finish(
@@ -796,7 +844,7 @@ def render_overview_report(result: dict[str, Any]) -> str:
     lines = [
         "# Weekly Overview extraction report",
         "",
-        f"- Source: `{result['source_file']}`",
+        f"- Source: `{result['source_file']}`" + (f" — {result['source_detail']}" if result.get("source_detail") else ""),
         f"- Title: {result.get('title') or '(none)'}",
         f"- Parser strategy: **{result['parser_strategy']['name']}** — {result['parser_strategy']['detail']}",
         "",

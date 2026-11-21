@@ -63,7 +63,8 @@ test("weekly timeline → week → lecture slides with citations", async ({ page
 test("source library reports failures and pages through the textbook", async ({ page }) => {
   await page.goto("/sources");
   await expect(page.getByText("1 file was not processed")).toBeVisible();
-  await expect(page.getByText(/source file could not be loaded/).first()).toBeVisible();
+  // The broken legacy .ppt fails either in LibreOffice or because LibreOffice is absent — both must be reported.
+  await expect(page.getByText(/source file could not be loaded|LibreOffice \(soffice\) is not installed/).first()).toBeVisible();
   await page.getByText(/All files in the archive/).click();
   await expect(page.getByRole("cell", { name: "__MACOSX/._index.html" })).toBeVisible();
 
@@ -89,4 +90,13 @@ test("auth pages explain local mode, health hides secrets", async ({ page, reque
 test("unknown documents show a not-found state", async ({ page }) => {
   await page.goto("/sources/00000000-0000-0000-0000-000000000000");
   await expect(page.getByRole("heading", { name: "Not found" })).toBeVisible();
+});
+
+test("learning pages refuse to invent sessions when the material has none", async ({ page }) => {
+  const errors = collectErrors(page);
+  for (const href of ["/learning", "/practice", "/planner", "/progress", "/tutor"]) {
+    await page.goto(href);
+    await expect(page.getByRole("heading", { name: "No teaching sessions identified" })).toBeVisible();
+  }
+  expect(errors).toEqual([]);
 });

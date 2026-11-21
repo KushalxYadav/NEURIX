@@ -24,6 +24,8 @@ from . import EXTRACTOR_VERSION, SCHEMA_VERSION
 from .archive import CONTENT_CATEGORIES
 from .chunking import DEFAULT_CONFIG, ChunkConfig, chunk_text
 from .config import Paths
+from .curriculum import build_curriculum, render_curriculum_report
+from .overview import archive_anchor_date
 from .status import Status, StatusTracker
 from .util import (
     estimate_tokens,
@@ -89,6 +91,42 @@ def _citation_section(filename: str, unit: dict[str, Any]) -> str:
         where = f"section {unit.get('section_number')}"
     page = f", p. {unit['page_label']}" if unit.get("page_label") else ""
     return f"{filename}, {path or where}{page}"
+
+
+COURSE_FIELD_RE = re.compile(
+    r"^(Course Title|Course Code|Credits|Type|Instructor|Semester)$", re.I
+)
+
+
+def course_facts(lms_export: dict[str, Any] | None) -> dict[str, Any]:
+    """Label/value facts and outcomes from the LMS front page (verbatim)."""
+    if not lms_export:
+        return {}
+    front = next((p for p in lms_export.get("pages", []) if p.get("front_page")), None)
+    if not front:
+        return {"title": lms_export.get("title")}
+    lines = [l.strip() for l in front["text"].splitlines() if l.strip()]
+    facts: dict[str, Any] = {"title": lms_export.get("title"), "source": f"LMS front page '{front['title']}'"}
+    for i, line in enumerate(lines[:-1]):
+        if COURSE_FIELD_RE.match(line) and line.lower().replace(" ", "_") not in facts:
+            facts[line.lower().replace(" ", "_")] = lines[i + 1]
+    outcomes = []
+    for line in lines:
+        if m := re.match(r"^([KS]\d|AV\d)\s*[—–-]\s*(.+)$", line):
+            outcomes.append({"code": m.group(1), "text": m.group(2)})
+    facts["outcomes"] = outcomes
+    questions_start = next((i for i, l in enumerate(lines) if l.lower().startswith("guiding questions")), None)
+    if questions_start is not None:
+        facts["guiding_questions"] = [l for l in lines[questions_start + 1 : questions_start + 8] if l.endswith("?")]
+    if (i := next((i for i, l in enumerate(lines) if l.lower().startswith("this course is organized around one question")), None)) is not None:
+        facts["driving_question"] = lines[i + 1] if i + 1 < len(lines) else None
+    readings = []
+    if (start := next((i for i, l in enumerate(lines) if l.lower().startswith("required readings")), None)) is not None:
+        block = " ".join(lines[start : start + 20])
+        for m in re.finditer(r"([A-Z][a-z]+), [A-Z]\. [^()]*\((\d{4})\)\.\s*([^.]+)\.[^—]*—\s*([^.]+)\.", block):
+            readings.append({"author": m.group(1), "year": m.group(2), "title": m.group(3).strip(), "role": m.group(4).strip()})
+    facts["readings"] = readings
+    return facts
 
 
 def build_source_index(
@@ -233,6 +271,48 @@ def build_source_index(
                 if week and not any(a["week_ordinal"] == week["ordinal"] for a in document["week_associations"]):
                     associate(document, week, "filename_pattern", "unverified", f"'{match.group(0).strip()}' in {archive_path}")
 
+    # ------------------------------------------- LMS export + curriculum (F)
+    lms_path = paths.processed / "lms_export.json"
+    lms_export = read_json(lms_path) if lms_path.exists() else None
+    book_ids: set[str] = set()
+    if lms_export:
+        books_paths = {
+            i["resolved_path"] for m in lms_export["modules"] if m["kind"] == "books" for i in m["items"] if i.get("resolved_path")
+        }
+        for document in documents:
+            if books_paths & set(document["archive_paths"]) and document["document_type"] != "weekly_overview":
+                document["document_type"] = "textbook"
+                document["textbook_basis"] = "listed in the LMS 'Course Books' module"
+                book_ids.add(document["id"])
+    curriculum = build_curriculum(
+        slug=slug,
+        documents=documents,
+        extractions=extractions,
+        weeks=weeks,
+        lms_export=lms_export,
+        anchor=archive_anchor_date(inventory["archive"]["filename"]),
+    )
+    week_by_id = {w["id"]: w for w in weeks}
+    doc_by_id = {d["id"]: d for d in documents}
+    for link in curriculum.pop("week_associations"):
+        associate(doc_by_id[link["document_id"]], week_by_id[link["week_id"]], "session_date", "source_confirmed", link["evidence"])
+    session_by_doc: dict[str, list[str]] = defaultdict(list)
+    for session in curriculum["sessions"]:
+        for doc in session["documents"]:
+            session_by_doc[doc["document_id"]].append(session["key"])
+    for document in documents:
+        document["session_keys"] = session_by_doc.get(document["id"], [])
+    curriculum.update(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "extractor_version": EXTRACTOR_VERSION,
+            "generated_at": processed_at,
+            "course": course_facts(lms_export),
+        }
+    )
+    write_json_atomic(paths.processed / "curriculum.json", curriculum)
+    write_text_atomic(paths.reports / "curriculum_report.md", render_curriculum_report(curriculum))
+
     # -------------------------------------------------------- units + chunks
     units: list[dict[str, Any]] = []
     chunks: list[dict[str, Any]] = []
@@ -290,6 +370,9 @@ def build_source_index(
                     citation = _citation_page(
                         filename, unit["page_number"], unit.get("page_label"), unit.get("detected_printed_page")
                     )
+                    if document["document_type"] == "lecture_slides_pdf":
+                        # A slide deck exported to PDF: one page per slide.
+                        citation = f"{filename}, slide {unit['page_number']}"
                     number = unit["page_number"]
                     title = (unit.get("headings") or [{}])[0].get("text")
                 else:

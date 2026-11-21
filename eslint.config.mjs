@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Private study material and pipeline output (extracted archives contain third-party JS).
+    "data/**",
+    "source-material/**",
+    "tests/e2e/.fixture-data/**",
+    ".venv/**",
   ]),
 ]);
 

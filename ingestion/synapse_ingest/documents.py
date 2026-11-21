@@ -303,7 +303,7 @@ def extract_pdf(path: Path) -> dict[str, Any]:
     }
 
 
-def ocr_pdf(path: Path, out_dir: Path, timeout: int = 1800) -> Path:
+def ocr_pdf(path: Path, out_dir: Path, timeout: int = 3600) -> Path:
     """Optional OCR fallback using OCRmyPDF (only when explicitly requested)."""
     tool = shutil.which("ocrmypdf")
     if not tool:

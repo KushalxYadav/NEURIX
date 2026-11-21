@@ -56,6 +56,9 @@ Debug the overview parser on any HTML file:
 | C | `presentations.py` | `processed/presentations/<sha>.json` |
 | D | `documents.py` | `processed/documents/<sha>.json` |
 | E | `index.py`, `chunking.py` | `processed/source_index.json`, `content_units.jsonl`, `chunks.jsonl`, `reports/processing_report.md` |
+| A2 | `lms_export.py` | `processed/lms_export.json` — only when `index.html` is an LMS offline-viewer shell loading `viewer/course-data.js` (parsed as JSON, never executed) |
+| F | `curriculum.py` (run inside E) | `processed/curriculum.json`, `reports/curriculum_report.md` — sessions, dates, overview weeks (by date only), further reading → page ranges, assessments, discrepancies |
+| G | `questions.py` | `processed/questions.json` — numbered course questions with their answer keys, review questions, key terms (verbatim, cited) |
 | — | `status.py` | `processed/processing_status.json` (per document, per stage) |
 
 ### How unknown structure is handled

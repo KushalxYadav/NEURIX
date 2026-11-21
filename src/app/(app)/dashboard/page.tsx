@@ -27,7 +27,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getSubjectContext } from "@/lib/server/context";
 import { attempt } from "@/lib/server/load";
 import { daysUntil, formatDateRange, formatIsoDate, formatNumber, formatTimestamp, pluralize } from "@/lib/utils/format";
+import { CourseNow } from "@/components/dashboard/course-now";
 import { getLearningActivity, type LearningActivity } from "@/modules/learning/activity";
+import { loadLearning } from "@/modules/learning/overview";
 import { findCurrentWeek, summarizeCoverage, weekDisplayName, type CurrentWeek } from "@/modules/sources/timeline";
 import type { Week } from "@/modules/sources/types";
 
@@ -63,11 +65,14 @@ async function Dashboard() {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const [weeks, documents, activityResult] = await Promise.all([
+  const [weeks, documents, activityResult, learningResult] = await Promise.all([
     repo.listWeeks(subject.id),
     repo.listDocuments(subject.id),
     viewer.kind === "user" ? attempt(() => getLearningActivity(viewer.id, subject.id, today)) : Promise.resolve(null),
+    attempt(loadLearning),
   ]);
+  // Local mode with a generated curriculum: real schedule, plan and progress replace account-only cards.
+  const learning = learningResult.ok && learningResult.value.kind === "ready" && repo.mode === "local" ? learningResult.value.overview : null;
   const coverage = summarizeCoverage(subject, documents);
   const current = findCurrentWeek(weeks, today);
   const activity = activityResult?.ok ? activityResult.value : null;
@@ -93,6 +98,8 @@ async function Dashboard() {
         }
       />
 
+      {learning && <CourseNow overview={learning} />}
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
@@ -114,7 +121,7 @@ async function Dashboard() {
           </CardContent>
         </Card>
 
-        <ExamCard mode={repo.mode} activity={activity} today={today} />
+        {!learning && <ExamCard mode={repo.mode} activity={activity} today={today} />}
 
         <CurrentWeekCard current={current} />
 
@@ -165,7 +172,9 @@ async function Dashboard() {
           </CardContent>
         </Card>
 
-        <LearningEvidenceCard mode={repo.mode} activity={activity} failed={activityResult?.ok === false} />
+        {!learning && <LearningEvidenceCard mode={repo.mode} activity={activity} failed={activityResult?.ok === false} />}
+        {!learning && (
+          <>
 
         <ActivityList
           title="Today’s study tasks"
@@ -205,6 +214,8 @@ async function Dashboard() {
             secondary: `${s.activity} · ${formatTimestamp(s.startedAt)}`,
           }))}
         />
+          </>
+        )}
       </div>
     </div>
   );
