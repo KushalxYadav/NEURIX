@@ -1,0 +1,11 @@
+# SYNAPSE ingestion worker dependencies (Python 3.11+)
+# Document parsing
+pymupdf>=1.26,<3          # PDF text, page labels, outline (TOC), font metadata
+python-pptx>=1.0,<2       # .pptx slides, notes, shapes
+python-docx>=1.1,<2       # .docx paragraphs and headings
+beautifulsoup4>=4.12,<5   # index.html weekly overview + EPUB/XHTML
+lxml>=5.0                 # fast HTML/XML parser backend for BeautifulSoup
+# Database loading (optional: only needed for load_to_database.py)
+psycopg[binary]>=3.2,<4
+# Tests
+pytest>=8.0

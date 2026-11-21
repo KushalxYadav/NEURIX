@@ -1,0 +1,7 @@
+# Private study material and pipeline output must never be uploaded.
+source-material/
+data/
+*.zip
+Computer-fundamentals-and-networking-*
+.venv/
+tests/e2e/.fixture-data/
